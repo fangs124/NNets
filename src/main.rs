@@ -386,10 +386,12 @@ fn main() -> std::io::Result<()> {
                                 } else {
                                     //network won
                                     network_wins += 1;
+                                    /*
                                     #[allow(non_snake_case)]
                                     for dCda_x in vec_dCda_x.iter_mut() {
                                         *dCda_x = dCda_x.iter().map(|x| *x * -1.0).collect();
                                     }
+                                    */
 
                                     //random lost as x
 
