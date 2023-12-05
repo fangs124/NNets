@@ -44,7 +44,7 @@ impl<T: InputType + Clone> Network<T> {
         return Network {
             node_count,
             input_data,
-            alpha: 0.5,
+            alpha: 0.1,
             gamma: 0.8,
             weights,
             biases,
@@ -93,7 +93,7 @@ impl<T: InputType + Clone> Network<T> {
 
     pub fn train(&mut self, training_set: Vec<(Vec<T>, Vec<f32>)>, stride: i32) {
         let mut gamma: f32 = 1.0 / (training_set.len() as f32);
-        for (input_data, dCda) in training_set {
+        for (input_data, dCda) in training_set.into_iter().rev() {
             self.back_prop(input_data, dCda, gamma);
             gamma = gamma * self.gamma.powi(stride);
         }
@@ -182,4 +182,22 @@ pub fn sigmoid(x: f32) -> f32 {
 #[allow(non_snake_case, dead_code)]
 pub fn Dsigmoid(x: f32) -> f32 {
     sigmoid(x) * (1.0 - sigmoid(x))
+}
+
+#[allow(non_snake_case, dead_code)]
+pub fn LReLU(x: f32) -> f32 {
+    if x >= 0.0 {
+        x
+    } else {
+        x * 0.01
+    }
+}
+
+#[allow(non_snake_case, dead_code)]
+pub fn DLReLU(x: f32) -> f32 {
+    if x >= 0.0 {
+        1.0
+    } else {
+        0.01
+    }
 }

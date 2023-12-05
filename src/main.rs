@@ -47,6 +47,18 @@ impl GameBoard {
         vec.push(self.t_b == BB::ONES);
         vec
     }
+    pub fn to_vec_bool_x(&self) -> Vec<bool> {
+        let mut vec: Vec<bool> = Vec::new();
+        vec.append(&mut self.x_b.to_vec_bool());
+        vec.append(&mut self.o_b.to_vec_bool());
+        vec
+    }
+    pub fn to_vec_bool_o(&self) -> Vec<bool> {
+        let mut vec: Vec<bool> = Vec::new();
+        vec.append(&mut self.o_b.to_vec_bool());
+        vec.append(&mut self.x_b.to_vec_bool());
+        vec
+    }
 }
 
 //Choice State
@@ -84,11 +96,12 @@ fn main() -> std::io::Result<()> {
         CS::Quit,
         /*"Sample Game,  Save NNet, Load NNet, Print NNet,*/
     ];
+    let mut is_quit = false;
 
     //deal with loading/generating network here
     let network_q = String::from("New Network?");
     let network_opt = vec!["New Network", "Load Network"];
-    let node_count: Vec<usize> = vec![6, 9]; //param_here
+    let node_count: Vec<usize> = vec![19, 19, 9]; //param_here
     let mut gb = GameBoard::NEW_GAMEBOARD;
     let mut network: Network<bool>;
     let mut rng = rand::thread_rng();
@@ -99,13 +112,13 @@ fn main() -> std::io::Result<()> {
         "New Network" => {
             let now = Instant::now();
             println!("Initializing...");
-            network = Network::new_default(node_count, gb.to_vec_bool());
+            network = Network::new_default(node_count.clone(), gb.to_vec_bool_o());
             println!("Elapsed: {:.2?}", now.elapsed());
         }
         "Load Network" => {
             let now = Instant::now();
             println!("Loading...");
-            let file = File::open("network.json")?;
+            let file = File::open(format!("{:?}network.json", node_count.clone()))?;
             let mut buf_reader = BufReader::new(file);
             let mut contents = String::new();
             buf_reader.read_to_string(&mut contents)?;
@@ -117,7 +130,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    while choice != CS::Quit {
+    while !is_quit {
         match choice {
             CS::NoChoice => {
                 choice = Select::new(&start_q, start_opt.clone())
@@ -133,13 +146,15 @@ fn main() -> std::io::Result<()> {
                 {
                     "Yes" => {
                         // save network
-                        let file = File::create("network.json")?;
+                        let file = File::create(format!("{:?}network.json", node_count.clone()))?;
 
                         serde_json::to_writer(file, &network)?;
                     }
                     "No" => {}
                     _ => panic!("Prompt error"),
                 }
+                is_quit = true;
+                continue;
             }
             CS::Train => {
                 let mut stdout = stdout();
@@ -147,16 +162,19 @@ fn main() -> std::io::Result<()> {
                 let mut stream: BufWriter<&std::io::Stdout> = BufWriter::new(&stdout);
                 let mut stream_err: BufWriter<&std::io::Stderr> = BufWriter::new(&stderr);
                 writeln!(stream, "Press q to stop.")?;
-                let mut now = Instant::now();
                 let start_time = Instant::now();
+                let mut now = Instant::now();
 
                 /* various counters for data gathering */
-                let mut self_play: u128 = 0;
-                let mut x_trained: u128 = 0;
-                let mut o_trained: u128 = 0;
-                let mut network_wins: u128 = 0;
-                let mut random_wins: u128 = 0;
-                let mut draws: u128 = 0;
+                let mut loop_counter: usize = 0;
+                let mut hundykay_counter: usize = 0;
+                let mut self_play: usize = 0;
+                let mut x_trained: usize = 0;
+                let mut o_trained: usize = 0;
+                let mut network_wins: usize = 0;
+                let mut random_wins: usize = 0;
+                let mut draws: usize = 0;
+                let mut self_draws: usize = 0;
 
                 /* training flow controls */
                 let mut is_training = true;
@@ -164,7 +182,7 @@ fn main() -> std::io::Result<()> {
                 let mut train_x: bool = true;
 
                 /* logging first thousand games or so */
-                let mut f = File::create("log.txt").unwrap();
+                let mut f = File::create(format!("{:?}log.txt", node_count.clone())).unwrap();
                 writeln!(&mut f, "First 1 second:")?;
                 writeln!(
                     stream,
@@ -197,7 +215,13 @@ fn main() -> std::io::Result<()> {
                     };
 
                     gb.new_game();
-                    network.set_input(gb.to_vec_bool());
+                    /*
+                    if x_turn {
+                        network.set_input(gb.to_vec_bool_x());
+                    } else {
+                        network.set_input(gb.to_vec_bool_o());
+                    }*/
+                    //let vec_bool = gb.to_vec_bool();
 
                     let mut x_turn: bool = true;
                     let mut x_moves: Vec<usize> = Vec::new();
@@ -206,8 +230,14 @@ fn main() -> std::io::Result<()> {
                     let mut o_states: Vec<Vec<bool>> = Vec::new();
 
                     while gb.game_state() == GS::Ongoing {
-                        let vec_bool = gb.to_vec_bool();
-                        //println!("{:?}", vec_bool);
+                        let mut vec_bool = Vec::new();
+                        if x_turn {
+                            vec_bool.append(&mut gb.to_vec_bool_x().clone().to_owned());
+                        } else {
+                            vec_bool.append(&mut gb.to_vec_bool_o().clone().to_owned());
+                        }
+                        //let vec_bool = gb.to_vec_bool();
+
                         if x_turn {
                             x_states.push(vec_bool.clone())
                         } else {
@@ -261,7 +291,8 @@ fn main() -> std::io::Result<()> {
                                 .map(|&x| x)
                                 .collect();
                             let rand_num = rng.gen_range(0..indices.len());
-                            gb.make_move(BB::POSSIBLE_MOVES[indices[rand_num]]);
+                            gb.make_move(BB::POSSIBLE_MOVES[indices[rand_num]])
+                                .expect("invalid moves are impossible!");
                             if x_turn {
                                 x_moves.push(rand_num);
                             } else {
@@ -274,77 +305,107 @@ fn main() -> std::io::Result<()> {
                     // game ended
                     match gb.game_state() {
                         GS::XWin => {
+                            #[allow(non_snake_case)]
+                            for dCda_o in vec_dCda_o.iter_mut() {
+                                *dCda_o = dCda_o.iter().map(|x| *x * -1.0).collect();
+                            }
                             if !is_playing_self {
-                                //playing random
                                 if train_x {
+                                    //network wins
                                     network_wins += 1;
+
+                                    //network won as x
                                     let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                         x_states.iter().cloned().zip(vec_dCda_x).collect();
                                     network.train(vec, 2);
-                                    network.update();
-                                    x_trained += 1;
-                                } else {
-                                    random_wins += 1;
-                                    //network lost
-                                    #[allow(non_snake_case)]
-                                    for dCda_o in vec_dCda_o.iter_mut() {
-                                        *dCda_o = dCda_o.iter().map(|x| *x * -1.0).collect();
-                                    }
+
+                                    //random lost as o
 
                                     let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                         o_states.iter().cloned().zip(vec_dCda_o).collect();
                                     network.train(vec, 2);
-                                    network.update();
+
+                                    //network.update();
+                                    x_trained += 1;
+                                } else {
+                                    //network lost
+                                    random_wins += 1;
+
+                                    //random won as x
+
+                                    let vec: Vec<(Vec<bool>, Vec<f32>)> =
+                                        x_states.iter().cloned().zip(vec_dCda_x).collect();
+                                    network.train(vec, 2);
+
+                                    //network lost as o
+                                    let vec: Vec<(Vec<bool>, Vec<f32>)> =
+                                        o_states.iter().cloned().zip(vec_dCda_o).collect();
+                                    network.train(vec, 2);
+                                    //network.update();
                                     o_trained += 1;
                                 }
                             } else {
                                 //playing self
-                                let vec: Vec<(Vec<bool>, Vec<f32>)> =
-                                    x_states.iter().cloned().zip(vec_dCda_x).collect();
-                                network.train(vec, 2);
-
                                 #[allow(non_snake_case)]
-                                for dCda_o in vec_dCda_o.iter_mut() {
-                                    *dCda_o = dCda_o.iter().map(|x| *x * -1.0).collect();
-                                }
+                                let vec: Vec<(
+                                    Vec<bool>,
+                                    Vec<f32>,
+                                )> = x_states.iter().cloned().zip(vec_dCda_x).collect();
+                                network.train(vec, 2);
 
                                 let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                     o_states.iter().cloned().zip(vec_dCda_o).collect();
                                 network.train(vec, 2);
-                                network.update();
+                                //network.update();
                                 self_play += 1;
                             }
                         }
                         GS::OWin => {
+                            #[allow(non_snake_case)]
+                            for dCda_x in vec_dCda_x.iter_mut() {
+                                *dCda_x = dCda_x.iter().map(|x| *x * -1.0).collect();
+                            }
                             if !is_playing_self {
                                 if train_x {
-                                    random_wins += 1;
                                     //network lost
+                                    random_wins += 1;
+
+                                    //network lost as x
+                                    let vec: Vec<(Vec<bool>, Vec<f32>)> =
+                                        x_states.iter().cloned().zip(vec_dCda_x).collect();
+                                    network.train(vec, 2);
+
+                                    //random won as o
+
+                                    let vec: Vec<(Vec<bool>, Vec<f32>)> =
+                                        o_states.iter().cloned().zip(vec_dCda_o).collect();
+                                    network.train(vec, 2);
+
+                                    //network.update();
+                                    x_trained += 1;
+                                } else {
+                                    //network won
+                                    network_wins += 1;
                                     #[allow(non_snake_case)]
                                     for dCda_x in vec_dCda_x.iter_mut() {
                                         *dCda_x = dCda_x.iter().map(|x| *x * -1.0).collect();
                                     }
 
+                                    //random lost as x
+
                                     let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                         x_states.iter().cloned().zip(vec_dCda_x).collect();
                                     network.train(vec, 2);
-                                    network.update();
-                                    x_trained += 1;
-                                } else {
-                                    network_wins += 1;
+
+                                    //network won as o
                                     let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                         o_states.iter().cloned().zip(vec_dCda_o).collect();
                                     network.train(vec, 2);
-                                    network.update();
+                                    //network.update();
                                     o_trained += 1;
                                 }
                             } else {
-                                //playing self
-                                #[allow(non_snake_case)]
-                                for dCda_x in vec_dCda_x.iter_mut() {
-                                    *dCda_x = dCda_x.iter().map(|x| *x * -1.0).collect();
-                                }
-
+                                //playing self,
                                 let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                     x_states.iter().cloned().zip(vec_dCda_x).collect();
                                 network.train(vec, 2);
@@ -352,23 +413,24 @@ fn main() -> std::io::Result<()> {
                                 let vec: Vec<(Vec<bool>, Vec<f32>)> =
                                     o_states.iter().cloned().zip(vec_dCda_o).collect();
                                 network.train(vec, 2);
-                                network.update();
-                                self_play += 1
+                                //network.update();
+                                self_play += 1;
                             }
                         }
                         GS::Tie => {
                             if !is_playing_self {
                                 draws += 1
                             } else {
+                                self_play += 1;
+                                self_draws += 1;
                                 // here to train draws against self.
                             }
                         }
                         _ => panic!("game state should be impossible!"),
                     }
-                    if now.elapsed() >= Duration::from_secs(5) {
-                        //update every 15 sec
-                        now = Instant::now();
-                        let total: u128 = network_wins + random_wins + draws;
+                    /*
+                    if start_time.elapsed() <= Duration::from_secs(5) {
+                        let total: usize = network_wins + random_wins + draws;
                         /*
                         println!("X wins: {}, O wins: {}, Draws: {} ({:.2}%), Time Training: {:.2?}, X trained: {}, O trained: {}",
                             x_wins, o_wins, draws, percent, start_time.elapsed(), x_trained, o_trained);
@@ -389,21 +451,88 @@ fn main() -> std::io::Result<()> {
                             network_wins,
                             random_wins,
                             draws,
-                            (network_wins as f64) / (total as f64),
-                            (random_wins as f64) / (total as f64),
-                            (draws as f64) / (total as f64)
+                            100.0 * (network_wins as f64) / (total as f64),
+                            100.0 * (random_wins as f64) / (total as f64),
+                            100.0 * (draws as f64) / (total as f64)
                         )?;
                         writeln!(
                             stream,
-                            "Time Training: {:.2?}, Trained: {}k, (X:{},O:{}), Self Play: {}",
+                            "Time Training: {:.2?}, Trained: {}k, (X:{},O:{}), Self Play: {} (Draws: {:.2}%)",
                             start_time.elapsed(),
                             (x_trained + o_trained) / 1000,
                             x_trained,
                             o_trained,
-                            self_play
+                            self_play, (self_draws as f32/ self_play as f32)*100.0
                         )?;
                         stream.flush()?;
                     }
+                    */
+                    if (loop_counter % 1000) == 0 {
+                        //1k
+                        network.update();
+                    }
+                    if (loop_counter % 100000) == 0 {
+                        //100K
+                        let total: usize = network_wins + random_wins + draws;
+                        hundykay_counter += 1;
+                        stream.execute(cursor::MoveUp(2)).unwrap();
+                        stream
+                            .execute(terminal::Clear(terminal::ClearType::FromCursorDown))
+                            .unwrap();
+                        writeln!(
+                            stream,
+                            "N wins: {}, R wins: {}, Draws: {}, [{:.2}:{:.2}:{:.2}] (100K-epoch: {}, {:.2?})",
+                            network_wins,
+                            random_wins,
+                            draws,
+                            100.0 * (network_wins as f64) / (total as f64),
+                            100.0 * (random_wins as f64) / (total as f64),
+                            100.0 * (draws as f64) / (total as f64),
+                            hundykay_counter,
+                            now.elapsed(),
+                        )?;
+                        writeln!(
+                            stream,
+                            "Time Training: {:.2?}, Trained: {}k, (X:{},O:{}), Self Play: {} (Draws: {:.2}%)",
+                            start_time.elapsed(),
+                            (x_trained + o_trained) / 1000,
+                            x_trained,
+                            o_trained,
+                            self_play, (self_draws as f32/ self_play as f32)*100.0
+                        )?;
+                        writeln!(
+                            f,
+                            "N wins: {}, R wins: {}, Draws: {}, [{:.2}:{:.2}:{:.2}] (100K-epoch: {}, {:.2?})",
+                            network_wins,
+                            random_wins,
+                            draws,
+                            100.0 * (network_wins as f64) / (total as f64),
+                            100.0 * (random_wins as f64) / (total as f64),
+                            100.0 * (draws as f64) / (total as f64),
+                            hundykay_counter,
+                            now.elapsed(),
+                        )?;
+                        writeln!(
+                            f,
+                            "Time Training: {:.2?}, Trained: {}k, (X:{},O:{}), Self Play: {} (Draws: {:.2}%)",
+                            start_time.elapsed(),
+                            (x_trained + o_trained) / 1000,
+                            x_trained,
+                            o_trained,
+                            self_play, (self_draws as f32/ self_play as f32)*100.0
+                        )?;
+                        stream.flush()?;
+                        loop_counter = 0;
+                        self_play = 0;
+                        x_trained = 0;
+                        o_trained = 0;
+                        network_wins = 0;
+                        random_wins = 0;
+                        draws = 0;
+                        self_draws = 0;
+                        now = Instant::now();
+                    }
+                    loop_counter += 1;
                     train_x = rng.gen();
                     is_playing_self = rng.gen();
                 }
