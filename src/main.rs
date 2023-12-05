@@ -88,7 +88,7 @@ fn main() -> std::io::Result<()> {
     //println!("{:?}", BB::OUT_OF_BOUNDS.to_vec_bool());
     env::set_var("RUST_BACKTRACE", "1");
     let mut choice: CS = CS::NoChoice;
-    let start_q = String::from("YiffYaffYoff v0.1:");
+    let start_q = String::from("NNRL v0.1:");
     let start_opt: Vec<CS> = vec![
         CS::Play,
         CS::Train,
