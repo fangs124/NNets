@@ -159,8 +159,10 @@ impl<T: InputType> Network<T> {
                 //       = dC/da * phi'(z) * phi(z)
                 *self.dW[layer_count - l] = &*self.dW[layer_count - l]
                     + (self.alpha * gamma / pi)
-                        * (self.layers[layer_count - (l + 1)].map(phi(&self.ty)))
-                        * &dCdz.transpose();
+                        * &dCdz
+                        * (self.layers[layer_count - (l + 1)].map(phi(&self.ty))).transpose()
+                // (AB)^t = B^t A^t
+                // (AB^t)^t = B A^t
             } else {
                 // dC/dw = dC/da * da/dz   * dz/dw
                 //       = dC/da * phi'(z) * phi(z)
@@ -173,7 +175,7 @@ impl<T: InputType> Network<T> {
             // dC/da' = Sum dC/da  *  da/dz * dz/da'
             //        = Sum dz/da' *  dC/da * phi'(z)
             //        =        [w] * [dC/da * phi'(z)]
-            dCda = (self.alpha * gamma / pi) * &*self.weights[layer_count - l] * dCdz;
+            dCda = (self.alpha * gamma / pi) * self.weights[layer_count - l].transpose() * &dCdz;
         }
     }
 

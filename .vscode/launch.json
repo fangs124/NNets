@@ -7,8 +7,37 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug",
-            "program": "${workspaceFolder}/target/debug/NNets.exe",
+            "name": "Debug executable 'NNets'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=NNets",
+                    "--package=NNets"
+                ],
+                "filter": {
+                    "name": "NNets",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'NNets'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=NNets",
+                    "--package=NNets"
+                ],
+                "filter": {
+                    "name": "NNets",
+                    "kind": "bin"
+                }
+            },
             "args": [],
             "cwd": "${workspaceFolder}"
         }
