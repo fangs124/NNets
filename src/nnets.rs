@@ -73,7 +73,7 @@ impl<T: InputType> Network<T> {
         return Network {
             node_count,
             input_data,
-            alpha: 0.05,
+            alpha: 0.5,
             gamma: 0.95,
             weights,
             biases,
