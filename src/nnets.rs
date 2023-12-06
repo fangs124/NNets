@@ -73,7 +73,7 @@ impl<T: InputType> Network<T> {
         return Network {
             node_count,
             input_data,
-            alpha: 0.5,
+            alpha: 1.0,
             gamma: 0.95,
             weights,
             biases,
@@ -91,10 +91,12 @@ impl<T: InputType> Network<T> {
     pub fn forward_prop(&mut self, input_data: &mut Vec<T>) -> Vec<f64> {
         self.compute(input_data);
 
-        self.layers[self.node_count.len() - 1]
-            .data
-            .as_vec()
-            .to_vec()
+        softmax(
+            self.layers[self.node_count.len() - 1]
+                .data
+                .as_vec()
+                .to_vec(),
+        )
     }
 
     pub fn compute(&mut self, input_data: &mut Vec<T>) {
@@ -108,27 +110,15 @@ impl<T: InputType> Network<T> {
 
         // layer l = 1..L-1
         for l in 1..self.node_count.len() {
-            // last layer should use softargmax
-            if l == self.node_count.len() - 1 {
-                // z_l = softargmax(W_l * phi(z_{l-1}) + b_l)
-                *self.layers[l] = DVector::from_vec(softmax(
-                    (&*self.weights[l] * (&*self.layers[l - 1]).map(phi(&self.ty))
-                        + &*self.biases[l])
-                        .data
-                        .as_vec()
-                        .to_vec(),
-                ))
-            } else {
-                // z_l = W_l * phi(z_{l-1}) + b_l
-                *self.layers[l] = &*self.weights[l] * (&*self.layers[l - 1]).map(phi(&self.ty))
-                    + &*self.biases[l];
-            }
+            // z_l = W_l * phi(z_{l-1}) + b_l
+            *self.layers[l] =
+                &*self.weights[l] * (&*self.layers[l - 1]).map(phi(&self.ty)) + &*self.biases[l];
         }
     }
 
     // computes averaged out dpi/dtheta for policy pi_theta iteration.
     pub fn train(&mut self, training_set: Vec<(Vec<T>, Vec<f64>, usize)>, stride: i32) {
-        let mut gamma: f64 = 1.0 / (training_set.len() as f64);
+        let mut gamma: f64 = 1.0; // / (training_set.len() as f64);
         for (mut input_data, dCda, index) in training_set.into_iter().rev() {
             self.back_prop(&mut input_data, dCda, gamma, index);
             gamma = gamma * self.gamma.powi(stride);
@@ -137,9 +127,9 @@ impl<T: InputType> Network<T> {
 
     pub fn back_prop(&mut self, input_data: &mut Vec<T>, dCda: Vec<f64>, gamma: f64, index: usize) {
         #[allow(non_snake_case)]
-        let mut dCda: DVector<f64> = DVector::from_vec(dCda); //dCda layer L-1
         let output = self.forward_prop(input_data);
         let pi = output[index];
+        let mut dCda: DVector<f64> = DVector::from_vec(dCda) / pi; //dCda layer L-1
         let input_vector =
             DVector::from_iterator(input_data.len(), input_data.iter().map(|x| x.to_f64()));
         let layer_count = self.layers.len(); // L
@@ -151,31 +141,42 @@ impl<T: InputType> Network<T> {
 
             // dC/db = dC/da * da/dz   * dz/db
             //       = dC/da * phi'(z) * 1
-            *self.dB[layer_count - l] =
-                &*self.dB[layer_count - l] + (self.alpha * gamma / pi) * &dCdz;
+            *self.dB[layer_count - l] = &*self.dB[layer_count - l] + (self.alpha * gamma) * &dCdz;
+
+            //*self.dB[layer_count - l] =
+            //    &*self.dB[layer_count - l] + (self.alpha * gamma / pi) * &dCdz;
 
             if l != layer_count {
                 // dC/dw = dC/da * da/dz   * dz/dw
                 //       = dC/da * phi'(z) * phi(z)
                 *self.dW[layer_count - l] = &*self.dW[layer_count - l]
-                    + (self.alpha * gamma / pi)
-                        * &dCdz
-                        * (self.layers[layer_count - (l + 1)].map(phi(&self.ty))).transpose()
+                    + &dCdz * (self.layers[layer_count - (l + 1)].map(phi(&self.ty))).transpose()
+
+                //*self.dW[layer_count - l] = &*self.dW[layer_count - l]
+                //    + (self.alpha * gamma / pi)
+                //        * &dCdz
+                //        * (self.layers[layer_count - (l + 1)].map(phi(&self.ty))).transpose()
+
                 // (AB)^t = B^t A^t
                 // (AB^t)^t = B A^t
             } else {
                 // dC/dw = dC/da * da/dz   * dz/dw
                 //       = dC/da * phi'(z) * phi(z)
-                *self.dW[layer_count - l] = &*self.dW[layer_count - l]
-                    + (self.alpha * gamma / pi)
-                        * input_vector.map(phi(&self.ty))
-                        * dCdz.transpose();
+                *self.dW[layer_count - l] =
+                    &*self.dW[layer_count - l] + input_vector.map(phi(&self.ty)) * dCdz.transpose();
+
+                //*self.dW[layer_count - l] = &*self.dW[layer_count - l]
+                //    + (self.alpha * gamma / pi)
+                //        * input_vector.map(phi(&self.ty))
+                //        * dCdz.transpose();
             }
 
             // dC/da' = Sum dC/da  *  da/dz * dz/da'
             //        = Sum dz/da' *  dC/da * phi'(z)
             //        =        [w] * [dC/da * phi'(z)]
-            dCda = (self.alpha * gamma / pi) * self.weights[layer_count - l].transpose() * &dCdz;
+            dCda = self.weights[layer_count - l].transpose() * &dCdz;
+
+            //dCda = (self.alpha * gamma / pi) * self.weights[layer_count - l].transpose() * &dCdz;
         }
     }
 

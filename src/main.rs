@@ -174,6 +174,7 @@ impl Display for CS {
 
 // some constants/parameters
 const BATCH_SIZE: usize = 100;
+
 fn main() -> std::io::Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
 
@@ -191,7 +192,7 @@ fn main() -> std::io::Result<()> {
     /* ==== network loading/generating ==== */
     let network_q = String::from("New Network?");
     let network_opt = vec!["New Network", "Load Network"];
-    let node_count: Vec<usize> = vec![18, 36, 18, 9]; //param_here
+    let node_count: Vec<usize> = vec![18, 18, 9]; //param_here
     let mut gb = GameBoard::NEW_GAMEBOARD;
     let mut network: Network<bool>;
 
