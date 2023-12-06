@@ -1,8 +1,8 @@
+#![allow(non_camel_case_types, non_snake_case, dead_code)]
 extern crate nalgebra as na;
 use na::base::{DMatrix, DVector};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
-#[allow(non_snake_case, dead_code)]
+
 #[derive(Serialize, Deserialize)]
 pub struct Network<T> {
     pub node_count: Vec<usize>,
@@ -35,7 +35,6 @@ fn Dphi(ty: &phi_T) -> fn(f64) -> f64 {
     }
 }
 
-#[allow(non_snake_case, non_camel_case_types, dead_code)]
 #[derive(Serialize, Deserialize)]
 enum phi_T {
     sigmoid,
@@ -46,7 +45,7 @@ enum phi_T {
 
 // idk how to implement partial defaults, so document here
 // alpha = 0.05, gamma = 0.95
-#[allow(non_snake_case, dead_code)]
+
 impl<T: InputType> Network<T> {
     //internal node count describes internal layer
     pub fn new_default(internal_nodes: Vec<usize>, input_data: Vec<T>) -> Self {
@@ -85,11 +84,11 @@ impl<T: InputType> Network<T> {
         };
     }
 
-    pub fn set_input(&mut self, input_data: &Vec<T>) {
-        self.input_data = *input_data;
+    pub fn set_input(&mut self, input_data: Vec<T>) {
+        self.input_data = input_data;
     }
 
-    pub fn forward_prop(&mut self, input_data: &Vec<T>) -> Vec<f64> {
+    pub fn forward_prop(&mut self, input_data: &mut Vec<T>) -> Vec<f64> {
         self.compute(input_data);
 
         self.layers[self.node_count.len() - 1]
@@ -98,7 +97,7 @@ impl<T: InputType> Network<T> {
             .to_vec()
     }
 
-    pub fn compute(&mut self, mut input_data: &Vec<T>) {
+    pub fn compute(&mut self, input_data: &mut Vec<T>) {
         // turn input data into usable format.
         let input_vector: DVector<f64> =
             DVector::from_iterator(input_data.len(), input_data.iter_mut().map(|x| x.to_f64()));
@@ -130,13 +129,13 @@ impl<T: InputType> Network<T> {
     // computes averaged out dpi/dtheta for policy pi_theta iteration.
     pub fn train(&mut self, training_set: Vec<(Vec<T>, Vec<f64>, usize)>, stride: i32) {
         let mut gamma: f64 = 1.0 / (training_set.len() as f64);
-        for (input_data, dCda, index) in training_set.into_iter().rev() {
-            self.back_prop(input_data, dCda, gamma, index);
+        for (mut input_data, dCda, index) in training_set.into_iter().rev() {
+            self.back_prop(&mut input_data, dCda, gamma, index);
             gamma = gamma * self.gamma.powi(stride);
         }
     }
 
-    pub fn back_prop(&mut self, input_data: &Vec<T>, dCda: Vec<f64>, gamma: f64, index: usize) {
+    pub fn back_prop(&mut self, input_data: &mut Vec<T>, dCda: Vec<f64>, gamma: f64, index: usize) {
         #[allow(non_snake_case)]
         let mut dCda: DVector<f64> = DVector::from_vec(dCda); //dCda layer L-1
         let output = self.forward_prop(input_data);
@@ -147,13 +146,13 @@ impl<T: InputType> Network<T> {
 
         for l in 1..=layer_count {
             // dC/dz = dC/da * da/dz
-            let z = self.layers[layer_count - l];
+            let z = &*self.layers[layer_count - l];
             let dCdz = dCda.component_mul(&z.map(Dphi(&self.ty)));
 
             // dC/db = dC/da * da/dz   * dz/db
             //       = dC/da * phi'(z) * 1
             *self.dB[layer_count - l] =
-                &*self.dB[layer_count - l] + (self.alpha * gamma / pi) * dCdz;
+                &*self.dB[layer_count - l] + (self.alpha * gamma / pi) * &dCdz;
 
             if l != layer_count {
                 // dC/dw = dC/da * da/dz   * dz/dw
@@ -161,7 +160,7 @@ impl<T: InputType> Network<T> {
                 *self.dW[layer_count - l] = &*self.dW[layer_count - l]
                     + (self.alpha * gamma / pi)
                         * (self.layers[layer_count - (l + 1)].map(phi(&self.ty)))
-                        * dCdz.transpose();
+                        * &dCdz.transpose();
             } else {
                 // dC/dw = dC/da * da/dz   * dz/dw
                 //       = dC/da * phi'(z) * phi(z)
@@ -174,7 +173,7 @@ impl<T: InputType> Network<T> {
             // dC/da' = Sum dC/da  *  da/dz * dz/da'
             //        = Sum dz/da' *  dC/da * phi'(z)
             //        =        [w] * [dC/da * phi'(z)]
-            let dCda = (self.alpha * gamma / pi) * &*self.weights[layer_count - l] * dCdz;
+            dCda = (self.alpha * gamma / pi) * &*self.weights[layer_count - l] * dCdz;
         }
     }
 
@@ -194,7 +193,6 @@ pub trait InputType {
     fn to_f64(&self) -> f64;
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn ReLU(x: f64) -> f64 {
     if x >= 0.0 {
         x
@@ -203,7 +201,6 @@ pub fn ReLU(x: f64) -> f64 {
     }
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn DReLU(x: f64) -> f64 {
     if x >= 0.0 {
         1.0
@@ -212,17 +209,14 @@ pub fn DReLU(x: f64) -> f64 {
     }
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn sigmoid(x: f64) -> f64 {
-    (1 as f64 / (1 as f64 + std::f64::consts::E.powf(-x)))
+    1 as f64 / (1 as f64 + std::f64::consts::E.powf(-x))
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn Dsigmoid(x: f64) -> f64 {
     sigmoid(x) * (1.0 - sigmoid(x))
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn LReLU(x: f64) -> f64 {
     if x >= 0.0 {
         x
@@ -231,7 +225,6 @@ pub fn LReLU(x: f64) -> f64 {
     }
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn DLReLU(x: f64) -> f64 {
     if x >= 0.0 {
         1.0
@@ -240,25 +233,20 @@ pub fn DLReLU(x: f64) -> f64 {
     }
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn tanh(x: f64) -> f64 {
     x.tanh()
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn Dtanh(x: f64) -> f64 {
     1.0 - (x.tanh() * x.tanh())
 }
 
-#[allow(non_snake_case, dead_code)]
 pub fn softmax(xs: Vec<f64>) -> Vec<f64> {
     let mut vec: Vec<f64> = Vec::new();
     let mut total: f64 = 0.0;
-    let mut term: f64 = 0.0;
     for x in xs {
-        term = std::f64::consts::E.powf(x);
-        total += term;
-        vec.push(term);
+        total += std::f64::consts::E.powf(x);
+        vec.push(std::f64::consts::E.powf(x));
     }
     vec.iter_mut().map(|x| *x / total).collect()
 }

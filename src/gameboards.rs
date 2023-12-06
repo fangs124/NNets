@@ -33,7 +33,7 @@ impl BitBoard {
         BitBoard(0x0001),
     ];
 
-    pub const POSSIBLE_MOVES: [BitBoard; 9] = BB::POSSIBLE_MOVES;
+    pub const POSSIBLE_MOVES: [BitBoard; 9] = BB::MOVES;
 
     pub fn print_full_bitboard(&self) {
         let mut s = String::new();

@@ -1,7 +1,9 @@
+#![allow(non_camel_case_types, non_snake_case, dead_code)]
 mod gameboards;
 mod nnets;
 
 use crate::gameboards::*;
+
 use crate::nnets::*;
 use itertools::izip;
 
@@ -10,12 +12,12 @@ use crossterm::terminal::{Clear,ClearType};
 use inquire::Select;
 use rand::Rng;
 use std::env;
-use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 use std::fs::File;
+#[allow(unused_imports)]
 use std::io::{stderr, stdout, BufReader, BufWriter, Read, Write};
-use std::time::{Duration, Instant};
+use std::time:: Instant;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
 #[derive(PartialEq, Copy, Clone)]
@@ -115,11 +117,10 @@ impl BitBoard {
                 vec.push(self.get_val() & (1 << (11 - i)) != 0);
             }
         }
-        //println!("{:?}", self);
-        //println!("{:?}", vec);
         vec
     }
 }
+
 
 impl GameBoard {
     pub fn to_vec_bool(&self) -> Vec<bool> {
@@ -215,7 +216,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    /* ==== main loop ===================== */
+    /* ==== main loop ==== */
     while !is_quit {
         match choice {
             CS::NoChoice => {
@@ -244,7 +245,8 @@ fn main() -> std::io::Result<()> {
             }
             CS::Train => {
                 let mut rng = rand::thread_rng();
-                let mut stream_out: BufWriter<&std::io::Stdout> = BufWriter::new(&stdout());
+                let stdout = stdout();
+                let mut stream_out: BufWriter<&std::io::Stdout> = BufWriter::new(&stdout);
                 //let mut stream_err: BufWriter<&std::io::Stderr> = BufWriter::new(&stderr());
                 writeln!(stream_out, "Press q to stop.\n\n")?;
 
@@ -254,7 +256,7 @@ fn main() -> std::io::Result<()> {
                 let mut is_training = true;
                 let mut is_playing_self = false;
                 let mut loop_counter: usize = 0;
-                let mut f = File::create(format!("{:?}log.txt", node_count.clone()))
+                let f = File::create(format!("{:?}log.txt", node_count.clone()))
                     .expect("file creation failed");
                 let mut f_buff: BufWriter<&File> = BufWriter::new(&f);
                 sb.write_to_buf(&mut stream_out)?;
@@ -288,8 +290,8 @@ fn main() -> std::io::Result<()> {
                             .execute(Clear(ClearType::FromCursorDown))
                             .expect("xcross error");
                         stream_out.flush()?;
-                        sb.write_to_buf(&mut stream_out);
-                        sb.write_to_buf(&mut f_buff);
+                        sb.write_to_buf(&mut stream_out)?;
+                        sb.write_to_buf(&mut f_buff)?;
                         f_buff.flush()?;
                         
                         sb.update();
@@ -305,7 +307,96 @@ fn main() -> std::io::Result<()> {
 }
 
 fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool) {
-    net_vs_net(net, net, gb, sb, is_train);
+    gb.new_game();
+
+    let mut x_turn: bool = true; // x goes first
+    let mut x_moves: Vec<usize> = Vec::new();
+    let mut o_moves: Vec<usize> = Vec::new();
+    let mut x_states: Vec<Vec<bool>> = Vec::new();
+    let mut o_states: Vec<Vec<bool>> = Vec::new();
+
+    #[allow(non_snake_case)]
+    let mut vec_dCda_x: Vec<Vec<f64>> = Vec::new();
+    #[allow(non_snake_case)]
+    let mut vec_dCda_o: Vec<Vec<f64>> = Vec::new();
+
+    while gb.game_state() == GS::Ongoing {
+        #[allow(non_snake_case)]
+        let mut dCda: Vec<f64> = vec![0.0; BB::MOVES.len()];
+        let mut vec_bool: Vec<bool> = Vec::new();
+
+        if x_turn {
+            vec_bool.append(&mut gb.to_vec_bool_x());
+            x_states.push(vec_bool.clone());
+        } else {
+            vec_bool.append(&mut gb.to_vec_bool_o());
+            o_states.push(vec_bool.clone());
+        }
+
+        let mut inv_states: Vec<Vec<bool>> = Vec::new();
+        let mut inv_moves: Vec<usize> = Vec::new();
+        let output: Vec<f64> = net.forward_prop(&mut vec_bool);
+
+        // teach network not to make invalid moves
+        let inv_indices = get_invalid_indices(&output, 0.01, &gb);
+        let count = inv_indices.len();
+
+        for i in &inv_indices {
+            dCda[*i] = (-0.75) * inv_indices.len() as f64;
+            inv_states.push(vec_bool.clone());
+            inv_moves.push(*i);
+        }
+
+        sb.invalid_count += inv_indices.len() as u64;
+
+        // zip to pass to train
+        if is_train {
+            let vec = izip!(inv_states, vec![dCda; count], inv_moves);
+            net.train(vec.collect(), 2)
+        };
+
+        let index = get_index(&output, gb);
+        gb.make_move(BB::MOVES[index])
+            .expect("net_vs_self: invalid move");
+
+        // reset dCda for x_move
+        dCda = vec![0.0; BB::MOVES.len()];
+        dCda[index] = 1.0;
+
+        if x_turn {
+            x_moves.push(index);
+            vec_dCda_x.push(dCda);
+        } else {
+            o_moves.push(index);
+            vec_dCda_o.push(dCda);
+        }
+        // pass turn to next player
+        x_turn = !x_turn;
+    }
+
+    // game ended
+    if is_train {
+        match gb.game_state() {
+            GS::XWin => {
+                for dCda_o in vec_dCda_o.iter_mut() {
+                    *dCda_o = dCda_o.iter().map(|x| *x * -1.0).collect();
+                }
+            }
+            GS::OWin => {
+                for dCda_x in vec_dCda_x.iter_mut() {
+                    *dCda_x = dCda_x.iter().map(|x| *x * -1.0).collect();
+                }
+            }
+            GS::Tie => return,
+            _ => panic!("net_vs_random: state is impossible"),
+        }
+
+        let vecx = izip!(x_states, vec_dCda_x, x_moves).collect();
+        let veco = izip!(o_states, vec_dCda_o, o_moves).collect();
+        
+        net.train(vecx, 2);
+        net.train(veco, 2);
+    }
     sb.self_plays += 1;
 }
 
@@ -343,16 +434,16 @@ fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bo
         if x_turn == net1_is_x {
             let mut inv_states: Vec<Vec<bool>> = Vec::new();
             let mut inv_moves: Vec<usize> = Vec::new();
-            let output: Vec<f64> = net1.forward_prop(&vec_bool);
+            let output: Vec<f64> = net1.forward_prop(&mut vec_bool);
 
             // teach network not to make invalid moves
             let inv_indices = get_invalid_indices(&output, 0.01, &gb);
             let count = inv_indices.len();
 
-            for i in inv_indices {
-                dCda[i] = (-0.75) * inv_indices.len() as f64;
-                inv_states.push(vec_bool);
-                inv_moves.push(i);
+            for i in &inv_indices {
+                dCda[*i] = (-0.75) * inv_indices.len() as f64;
+                inv_states.push(vec_bool.clone());
+                inv_moves.push(*i);
             }
 
             sb.invalid_count += inv_indices.len() as u64;
@@ -365,7 +456,7 @@ fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bo
 
             let index = get_index(&output, gb);
             gb.make_move(BB::MOVES[index])
-                .expect("net_vs_random: invalid move");
+                .expect("net_vs_net: invalid move");
 
             // reset dCda for x_move
             dCda = vec![0.0; BB::MOVES.len()];
@@ -383,15 +474,15 @@ fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bo
         else {
             let mut inv_states: Vec<Vec<bool>> = Vec::new();
             let mut inv_moves: Vec<usize> = Vec::new();
-            let output: Vec<f64> = net2.forward_prop(&vec_bool);
+            let output: Vec<f64> = net2.forward_prop(&mut vec_bool);
 
             // teach network not to make invalid moves
             let inv_indices = get_invalid_indices(&output, 0.01, &gb);
             let count = inv_indices.len();
 
-            for i in inv_indices {
+            for &i in &inv_indices {
                 dCda[i] = (-0.75) * inv_indices.len() as f64;
-                inv_states.push(vec_bool);
+                inv_states.push(vec_bool.clone());
                 inv_moves.push(i);
             }
 
@@ -486,16 +577,16 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
         if x_turn == net_is_x {
             let mut inv_states: Vec<Vec<bool>> = Vec::new();
             let mut inv_moves: Vec<usize> = Vec::new();
-            let output: Vec<f64> = net.forward_prop(&vec_bool);
+            let output: Vec<f64> = net.forward_prop(&mut vec_bool);
 
             // teach network not to make invalid moves
             let inv_indices = get_invalid_indices(&output, 0.01, &gb);
             let count = inv_indices.len();
 
-            for i in inv_indices {
-                dCda[i] = (-0.75) * inv_indices.len() as f64;
-                inv_states.push(vec_bool);
-                inv_moves.push(i);
+            for i in &inv_indices {
+                dCda[*i] = (-0.75) * inv_indices.len() as f64;
+                inv_states.push(vec_bool.clone());
+                inv_moves.push(*i);
             }
 
             sb.invalid_count += inv_indices.len() as u64;
@@ -546,7 +637,7 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
         x_turn = !x_turn;
     }
 
-    if (gb.game_state() == GS::Tie) {
+    if gb.game_state() == GS::Tie {
         sb.draws += 1
     } else if (gb.game_state() == GS::XWin) == net_is_x {
         sb.net_wins += 1
@@ -598,6 +689,4 @@ fn get_index(net_output: &Vec<f64>, gb: &GameBoard) -> usize {
         .map(|(index, _)| index)
         .expect("get_index fail")
 }
-/*
 
-*/
