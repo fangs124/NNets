@@ -1,0 +1,3 @@
+First 1 second:
+N wins: 1, R wins: 0, Draws: 0, [100.00:0.00:0.00] (100K-epoch: 1, 8.50s)
+Time Training: 8.50s, Trained: 0k, (X:1,O:0), Self Play: 0 (Draws: NaN%)
