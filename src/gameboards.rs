@@ -21,17 +21,19 @@ impl BitBoard {
         BitBoard(0x0124), //diag
         BitBoard(0x0421), //other diag
     ];
-    pub const POSSIBLE_MOVES: [BitBoard; 9] = [
-        BitBoard(0x0001),
-        BitBoard(0x0002),
-        BitBoard(0x0004),
-        BitBoard(0x0010),
-        BitBoard(0x0020),
-        BitBoard(0x0040),
-        BitBoard(0x0100),
-        BitBoard(0x0200),
+    pub const MOVES: [BitBoard; 9] = [
         BitBoard(0x0400),
+        BitBoard(0x0200),
+        BitBoard(0x0100),
+        BitBoard(0x0040),
+        BitBoard(0x0020),
+        BitBoard(0x0010),
+        BitBoard(0x0004),
+        BitBoard(0x0002),
+        BitBoard(0x0001),
     ];
+
+    pub const POSSIBLE_MOVES: [BitBoard; 9] = BB::POSSIBLE_MOVES;
 
     pub fn print_full_bitboard(&self) {
         let mut s = String::new();
