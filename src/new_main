@@ -5,8 +5,7 @@ use crate::gameboards::*;
 use crate::nnets::*;
 use itertools::izip;
 
-use crossterm::{cursor, ExecutableCommand};
-use crossterm::terminal::{Clear,ClearType};
+use crossterm::{cursor, terminal, ExecutableCommand, Result};
 use inquire::Select;
 use rand::Rng;
 use std::env;
@@ -18,84 +17,9 @@ use std::io::{stderr, stdout, BufReader, BufWriter, Read, Write};
 use std::time::{Duration, Instant};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
-#[derive(PartialEq, Copy, Clone)]
 struct ScoreBoard {
-    invalid_count: u64,
-    vs_random: u64,
-    vs_self: u64,
-    net_wins: u64,
-    random_wins: u64,
-    draws: u64,
-    self_plays: u64,
-    self_draws: u64,
-    prev_w: f64,
-    prev_l: f64,
-    prev_d: f64,
-    epoch: u32,
-    start_time: Instant,
-    now: Instant,
+    invalid_count: u128,
 }
-impl ScoreBoard {
-    fn new() -> Self {
-        ScoreBoard {
-            invalid_count: 0,
-            vs_random: 0,
-            vs_self: 0,
-            net_wins: 0,
-            random_wins: 0,
-            draws: 0,
-            self_plays: 0,
-            self_draws: 0,
-            prev_w: 0.0,
-            prev_l: 0.0,
-            prev_d: 0.0,
-            epoch: 0,
-            start_time: Instant::now(),
-            now: Instant::now(),
-        }
-
-    }
-    fn update(&mut self) {
-        self.prev_w = 100.0 * (self.net_wins as f64) / (self.vs_random as f64);
-        self.prev_l = 100.0 * (self.random_wins as f64) / (self.vs_random as f64);
-        self.prev_d = 100.0 * (self.draws as f64) / (self.vs_random as f64);
-        self.self_plays = 0;
-        self.net_wins = 0;
-        self.random_wins = 0;
-        self.draws = 0;
-        self.self_draws = 0;
-        self.invalid_count = 0;
-        self.now = Instant::now();
-    }
-    fn write_to_buf<T: Write>(&mut self, stream: &mut BufWriter<T>) -> std::io::Result<()> {
-        writeln!(
-            stream,
-            "N wins: {}, R wins: {}, Draws: {}, [{:.2}+({:.2}):{:.2}+({:.2}):{:.2}+({:.2})] (100k-epoch: {}, {:.2?}) invalid this epoch: {}",
-            self.net_wins,
-            self.random_wins,
-            self.draws,
-            100.0 * (self.net_wins as f64) / (self.vs_random as f64),
-            (100.0 * (self.net_wins as f64) / (self.vs_random as f64)) - self.prev_w as f64,
-            100.0 * (self.random_wins as f64) / (self.vs_random as f64),
-            (100.0 * (self.random_wins as f64) / (self.vs_random as f64)) - self.prev_l as f64, 
-            100.0 * (self.draws as f64) / (self.vs_random as f64),
-            (100.0 * (self.draws as f64) / (self.vs_random as f64)) - self.prev_d as f64,
-            self.epoch,
-            self.now.elapsed(),
-            self.invalid_count,
-        )?;
-        writeln!(
-            stream,
-            "Time Training: {:.2?}, Self Play: {} (Draws: {:.2}%)",
-            self.start_time.elapsed(),
-            self.self_plays,
-            (self.self_draws as f64 / self.self_plays as f64) * 100.0,
-        )?;
-        stream.flush()?;
-        Ok(())
-    }
-}
-
 type SB = ScoreBoard;
 
 impl InputType for bool {
@@ -166,9 +90,6 @@ impl Display for CS {
         }
     }
 }
-
-// some constants/parameters
-const BATCH_SIZE: usize = 1000;
 fn main() -> std::io::Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
 
@@ -189,6 +110,7 @@ fn main() -> std::io::Result<()> {
     let node_count: Vec<usize> = vec![18, 36, 18, 9]; //param_here
     let mut gb = GameBoard::NEW_GAMEBOARD;
     let mut network: Network<bool>;
+    let mut rng = rand::thread_rng();
 
     match Select::new(&network_q, network_opt)
         .prompt()
@@ -243,58 +165,29 @@ fn main() -> std::io::Result<()> {
                 continue;
             }
             CS::Train => {
-                let mut rng = rand::thread_rng();
                 let mut stream_out: BufWriter<&std::io::Stdout> = BufWriter::new(&stdout());
-                //let mut stream_err: BufWriter<&std::io::Stderr> = BufWriter::new(&stderr());
-                writeln!(stream_out, "Press q to stop.\n\n")?;
+                let mut stream_err: BufWriter<&std::io::Stderr> = BufWriter::new(&ststderr());
+                writeln!(stream, "Press q to stop.")?;
+                let start_time = Instant::now();
+                let mut now = Instant::now();
+                let mut prev_w = 0.0;
+                let mut prev_l = 0.0;
+                let mut prev_d = 0.0;
 
-                let mut sb = SB::new();
-
-                /* training flow controls */
-                let mut is_training = true;
-                let mut is_playing_self = false;
+                let mut hundykay_counter: usize = 0;
+                
+                /* various counters for data gathering */
                 let mut loop_counter: usize = 0;
-                let mut f = File::create(format!("{:?}log.txt", node_count.clone()))
-                    .expect("file creation failed");
-                let mut f_buff: BufWriter<&File> = BufWriter::new(&f);
-                sb.write_to_buf(&mut stream_out)?;
-
-                while is_training {
-                    // listen to 'q' for interupt
-                    let return_val = unsafe { GetAsyncKeyState(0x51 as i32) };
-                    if return_val & 0x01 != 0 {
-                        //stop training
-                        choice = CS::NoChoice;
-                        is_training = false;
-                        continue;
-                    };
-                    if is_playing_self {
-                        net_vs_self(&mut network, &mut gb, &mut sb, true)
-                    } else {
-                        net_vs_random(&mut network, &mut gb, &mut sb, true)
-                    }
-
-                    is_playing_self = rng.gen();
-                    loop_counter += 1;
-
-                    if (loop_counter % BATCH_SIZE) == 0 {
-                        network.update();
-                    }
-                    if (loop_counter % BATCH_SIZE*100) == 0 {
-                        //100K
-                        sb.epoch += 1;
-                        stream_out.execute(cursor::MoveUp(2)).expect("xcross error");
-                        stream_out
-                            .execute(Clear(ClearType::FromCursorDown))
-                            .expect("xcross error");
-                        stream_out.flush()?;
-                        sb.write_to_buf(&mut stream_out);
-                        sb.write_to_buf(&mut f_buff);
-                        f_buff.flush()?;
-                        
-                        sb.update();
-                    }  
-                }
+                let mut hundykay_counter: usize = 0;
+                let mut invalid_total: usize = 0;
+                let mut invalid_counter: usize = 0;
+                let mut self_play: usize = 0;
+                let mut x_trained: usize = 0;
+                let mut o_trained: usize = 0;
+                let mut network_wins: usize = 0;
+                let mut random_wins: usize = 0;
+                let mut draws: usize = 0;
+                let mut self_draws: usize = 0;
             }
             CS::Sample => unimplemented!("oops"),
             CS::Play => unimplemented!("oops"),
@@ -304,13 +197,17 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool) {
+fn net_vs_self(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_train: bool) {
     net_vs_net(net, net, gb, sb, is_train);
-    sb.self_plays += 1;
 }
 
-type N = Network<bool>;
-fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bool) {
+fn net_vs_net(
+    net1: &mut Network<bool>,
+    net2: &mut Network<bool>,
+    gb: &mut GameBoard,
+    sb: &mut SB,
+    is_train: bool,
+) {
     gb.new_game();
     let mut rng = rand::thread_rng();
     let net1_is_x: bool = rng.gen();
@@ -355,7 +252,7 @@ fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bo
                 inv_moves.push(i);
             }
 
-            sb.invalid_count += inv_indices.len() as u64;
+            sb.invalid_count += inv_indices.len() as u128;
 
             // zip to pass to train
             if is_train {
@@ -395,7 +292,7 @@ fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bo
                 inv_moves.push(i);
             }
 
-            sb.invalid_count += inv_indices.len() as u64;
+            sb.invalid_count += inv_indices.len() as u128;
 
             // zip to pass to train
             if is_train {
@@ -498,7 +395,7 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
                 inv_moves.push(i);
             }
 
-            sb.invalid_count += inv_indices.len() as u64;
+            sb.invalid_count += inv_indices.len() as u128;
 
             // zip to pass to train
             if is_train {
@@ -546,13 +443,6 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
         x_turn = !x_turn;
     }
 
-    if (gb.game_state() == GS::Tie) {
-        sb.draws += 1
-    } else if (gb.game_state() == GS::XWin) == net_is_x {
-        sb.net_wins += 1
-    } else {
-        sb.random_wins += 1
-    }
     // game ended
     if is_train {
         match gb.game_state() {

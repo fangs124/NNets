@@ -105,6 +105,8 @@ pub struct GameBoard {
     pub t_b: BitBoard,
 }
 
+pub type GB = GameBoard;
+
 pub trait GameBoardMove {
     fn to_bitboard(&self) -> BitBoard;
 }
