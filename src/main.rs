@@ -7,8 +7,8 @@ use crate::gameboards::*;
 use crate::nnets::*;
 use itertools::izip;
 
+use crossterm::terminal::{Clear, ClearType};
 use crossterm::{cursor, ExecutableCommand};
-use crossterm::terminal::{Clear,ClearType};
 use inquire::Select;
 use rand::Rng;
 use std::env;
@@ -17,7 +17,7 @@ use std::fmt::Display;
 use std::fs::File;
 #[allow(unused_imports)]
 use std::io::{stderr, stdout, BufReader, BufWriter, Read, Write};
-use std::time:: Instant;
+use std::time::Instant;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
 #[derive(PartialEq, Copy, Clone)]
@@ -55,7 +55,6 @@ impl ScoreBoard {
             start_time: Instant::now(),
             now: Instant::now(),
         }
-
     }
     fn update(&mut self) {
         self.prev_w = 100.0 * (self.net_wins as f64) / (self.vs_random as f64);
@@ -65,27 +64,32 @@ impl ScoreBoard {
         self.net_wins = 0;
         self.random_wins = 0;
         self.draws = 0;
+        self.vs_self = 0;
+        self.vs_random = 0;
         self.self_draws = 0;
         self.invalid_count = 0;
         self.now = Instant::now();
     }
+
     fn write_to_buf<T: Write>(&mut self, stream: &mut BufWriter<T>) -> std::io::Result<()> {
         writeln!(
             stream,
-            "N wins: {}, R wins: {}, Draws: {}, [{:.2}+({:.2}):{:.2}+({:.2}):{:.2}+({:.2})] (100k-epoch: {}, {:.2?}) invalid this epoch: {}",
+            "N wins: {}, R wins: {}, Draws: {}, [{:.2}+({:.2}):{:.2}+({:.2}):{:.2}+({:.2})] ({}k-epoch: {}, {:.2?}) invalid this epoch: {}",
             self.net_wins,
             self.random_wins,
             self.draws,
             100.0 * (self.net_wins as f64) / (self.vs_random as f64),
             (100.0 * (self.net_wins as f64) / (self.vs_random as f64)) - self.prev_w as f64,
             100.0 * (self.random_wins as f64) / (self.vs_random as f64),
-            (100.0 * (self.random_wins as f64) / (self.vs_random as f64)) - self.prev_l as f64, 
+            (100.0 * (self.random_wins as f64) / (self.vs_random as f64)) - self.prev_l as f64,
             100.0 * (self.draws as f64) / (self.vs_random as f64),
             (100.0 * (self.draws as f64) / (self.vs_random as f64)) - self.prev_d as f64,
+            BATCH_SIZE,
             self.epoch,
             self.now.elapsed(),
             self.invalid_count,
         )?;
+
         writeln!(
             stream,
             "Time Training: {:.2?}, Self Play: {} (Draws: {:.2}%)",
@@ -93,6 +97,7 @@ impl ScoreBoard {
             self.self_plays,
             (self.self_draws as f64 / self.self_plays as f64) * 100.0,
         )?;
+
         stream.flush()?;
         Ok(())
     }
@@ -120,7 +125,6 @@ impl BitBoard {
         vec
     }
 }
-
 
 impl GameBoard {
     pub fn to_vec_bool(&self) -> Vec<bool> {
@@ -169,7 +173,7 @@ impl Display for CS {
 }
 
 // some constants/parameters
-const BATCH_SIZE: usize = 1000;
+const BATCH_SIZE: usize = 100;
 fn main() -> std::io::Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
 
@@ -282,20 +286,19 @@ fn main() -> std::io::Result<()> {
                     if (loop_counter % BATCH_SIZE) == 0 {
                         network.update();
                     }
-                    if (loop_counter % BATCH_SIZE*100) == 0 {
+                    if loop_counter == (BATCH_SIZE * 1000) {
                         //100K
                         sb.epoch += 1;
                         stream_out.execute(cursor::MoveUp(2)).expect("xcross error");
                         stream_out
                             .execute(Clear(ClearType::FromCursorDown))
                             .expect("xcross error");
-                        stream_out.flush()?;
                         sb.write_to_buf(&mut stream_out)?;
                         sb.write_to_buf(&mut f_buff)?;
-                        f_buff.flush()?;
-                        
+
                         sb.update();
-                    }  
+                        loop_counter = 0;
+                    }
                 }
             }
             CS::Sample => unimplemented!("oops"),
@@ -387,13 +390,13 @@ fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool
                     *dCda_x = dCda_x.iter().map(|x| *x * -1.0).collect();
                 }
             }
-            GS::Tie => return,
+            GS::Tie => sb.self_draws += 1,
             _ => panic!("net_vs_random: state is impossible"),
         }
 
         let vecx = izip!(x_states, vec_dCda_x, x_moves).collect();
         let veco = izip!(o_states, vec_dCda_o, o_moves).collect();
-        
+
         net.train(vecx, 2);
         net.train(veco, 2);
     }
@@ -644,6 +647,8 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
     } else {
         sb.random_wins += 1
     }
+
+    sb.vs_random += 1;
     // game ended
     if is_train {
         match gb.game_state() {
@@ -689,4 +694,3 @@ fn get_index(net_output: &Vec<f64>, gb: &GameBoard) -> usize {
         .map(|(index, _)| index)
         .expect("get_index fail")
 }
-
