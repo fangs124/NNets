@@ -203,7 +203,7 @@ fn main() -> std::io::Result<()> {
         "New Network" => {
             let now = Instant::now();
             println!("Initializing...");
-            network = Network::new_default(node_count.clone(), gb.to_vec_bool_o());
+            network = Network::new_default(node_count.clone(), gb.to_vec_bool_x());
             println!("Elapsed: {:.2?}", now.elapsed());
         }
         "Load Network" => {
@@ -276,9 +276,9 @@ fn main() -> std::io::Result<()> {
                         continue;
                     };
                     if is_playing_self {
-                        net_vs_self(&mut network, &mut gb, &mut sb, true)
+                        net_vs_self(&mut network, &mut gb, &mut sb, true, false)
                     } else {
-                        net_vs_random(&mut network, &mut gb, &mut sb, true)
+                        net_vs_random(&mut network, &mut gb, &mut sb, true, false)
                     }
 
                     is_playing_self = rng.gen();
@@ -302,17 +302,44 @@ fn main() -> std::io::Result<()> {
                     }
                 }
             }
-            CS::Sample => unimplemented!("oops"),
-            CS::Play => unimplemented!("oops"),
+            CS::Sample => {
+                let mut sb = SB::new();
+                if let Ok(ans) =
+                    Select::new("random or self play?", vec!["random", "self play"]).prompt()
+                {
+                    match ans {
+                        "random" => net_vs_random(&mut network, &mut gb, &mut sb, false, true),
+                        "self play" => net_vs_self(&mut network, &mut gb, &mut sb, false, true),
+                        _ => panic!("prompt error!"),
+                    }
+                } else {
+                    panic!("prompt error!");
+                }
+                choice = CS::NoChoice;
+            }
+            CS::Play => {
+                net_vs_player(&mut network, &mut gb);
+                if let Ok(ans) = Select::new("play again?", vec!["Yes", "No"]).prompt() {
+                    match ans {
+                        "Yes" => continue,
+                        "No" => choice = CS::NoChoice,
+                        _ => panic!("prompt error!"),
+                    }
+                } else {
+                    panic!("prompt error!");
+                }
+            }
             _ => panic!("choice state impossible"),
         }
     }
     Ok(())
 }
 
-fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool) {
+fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool, sample: bool) {
     gb.new_game();
-
+    if sample {
+        println!("net_vs_self");
+    }
     let mut x_turn: bool = true; // x goes first
     let mut x_moves: Vec<usize> = Vec::new();
     let mut o_moves: Vec<usize> = Vec::new();
@@ -362,7 +389,9 @@ fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool
         let index = get_index(&output, gb);
         gb.make_move(BB::MOVES[index])
             .expect("net_vs_self: invalid move");
-
+        if sample {
+            gb.print_gameboard();
+        }
         // reset dCda for x_move
         dCda = vec![0.0; BB::MOVES.len()];
         dCda[index] = 1.0;
@@ -406,7 +435,7 @@ fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool
 }
 
 type N = Network<bool>;
-fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bool) {
+fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bool, sample: bool) {
     gb.new_game();
     let mut rng = rand::thread_rng();
     let net1_is_x: bool = rng.gen();
@@ -549,11 +578,20 @@ fn net_vs_net(net1: &mut N, net2: &mut N, gb: &mut GB, sb: &mut SB, is_train: bo
     }
 }
 
-fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_train: bool) {
+fn net_vs_random(
+    net: &mut Network<bool>,
+    gb: &mut GameBoard,
+    sb: &mut SB,
+    is_train: bool,
+    sample: bool,
+) {
     gb.new_game();
     let mut rng = rand::thread_rng();
     let net_is_x: bool = rng.gen();
-
+    if sample {
+        println!("net_vs_random");
+        println!("net is x: {}", net_is_x);
+    }
     let mut x_turn: bool = true; // x goes first
     let mut x_moves: Vec<usize> = Vec::new();
     let mut o_moves: Vec<usize> = Vec::new();
@@ -605,7 +643,9 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
             let index = get_index(&output, gb);
             gb.make_move(BB::MOVES[index])
                 .expect("net_vs_random: invalid move");
-
+            if sample {
+                gb.print_gameboard();
+            }
             // reset dCda for x_move
             dCda = vec![0.0; BB::MOVES.len()];
             dCda[index] = 1.0;
@@ -627,7 +667,9 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
             let rand_num = rng.gen_range(0..indices.len());
             gb.make_move(BB::MOVES[indices[rand_num]])
                 .expect("net_vs_random: invalid move");
-
+            if sample {
+                gb.print_gameboard();
+            }
             dCda[indices[rand_num]] = 1.0;
             if x_turn {
                 x_moves.push(indices[rand_num]);
@@ -672,6 +714,60 @@ fn net_vs_random(net: &mut Network<bool>, gb: &mut GameBoard, sb: &mut SB, is_tr
         net.train(vec, 2);
         let vec = izip!(o_states, vec_dCda_o, o_moves).collect();
         net.train(vec, 2);
+    }
+}
+
+fn net_vs_player(net: &mut Network<bool>, gb: &mut GameBoard) {
+    gb.new_game();
+    let mut rng = rand::thread_rng();
+    let net_is_x: bool = rng.gen();
+    let mut x_turn: bool = true; // x goes first
+    let move_q = String::from("Please select a square.");
+
+    while gb.game_state() == GS::Ongoing {
+        #[allow(non_snake_case)]
+        let mut vec_bool: Vec<bool> = Vec::new();
+
+        if x_turn {
+            vec_bool.append(&mut gb.to_vec_bool_x());
+        } else {
+            vec_bool.append(&mut gb.to_vec_bool_o());
+        }
+
+        // net's turn
+        if x_turn == net_is_x {
+            let output: Vec<f64> = net.forward_prop(&mut vec_bool);
+            let index = get_index(&output, gb);
+            gb.make_move(BB::MOVES[index])
+                .expect("net_vs_player: invalid move");
+            println!("net's turn: ");
+            gb.print_gameboard();
+        }
+        // player's turn
+        else {
+            println!("player's turn:");
+            // make a random valid move
+            let indices: Vec<usize> = (0..9)
+                .filter(|&i| gb.is_valid_move(&BB::MOVES[i]))
+                .collect();
+            if let Ok(choice) = Select::new(&move_q, indices).prompt() {
+                gb.make_move(BB::MOVES[choice])
+                    .expect("prompt gives invalid move choice");
+            } else {
+                panic!("prompt error!")
+            }
+            gb.print_gameboard();
+        }
+        // pass turn to next player
+        x_turn = !x_turn;
+    }
+
+    if gb.game_state() == GS::Tie {
+        println!("a draw!")
+    } else if (gb.game_state() == GS::XWin) == net_is_x {
+        println!("net wins!")
+    } else {
+        println!("player wins!")
     }
 }
 
