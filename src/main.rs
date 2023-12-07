@@ -287,7 +287,7 @@ fn main() -> std::io::Result<()> {
                     if (loop_counter % BATCH_SIZE) == 0 {
                         network.update();
                     }
-                    if loop_counter == (BATCH_SIZE * 1000) {
+                    if (loop_counter % (BATCH_SIZE * 1000)) == 0 {
                         //100K
                         sb.epoch += 1;
                         stream_out.execute(cursor::MoveUp(2)).expect("xcross error");
@@ -396,7 +396,8 @@ fn net_vs_self(net: &mut Network<bool>, gb: &mut GB, sb: &mut SB, is_train: bool
         }
 
         let vecx = izip!(x_states, vec_dCda_x, x_moves).collect();
-        let veco = izip!(o_states, vec_dCda_o, o_moves).collect();
+        let veco: Vec<(Vec<bool>, Vec<f64>, usize)> =
+            izip!(o_states, vec_dCda_o, o_moves).collect();
 
         net.train(vecx, 2);
         net.train(veco, 2);
